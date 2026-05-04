@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORE-X | OMEGA PROTOCOL FINAL</title>
+    <style>
+        :root {
+            --primary: #00ff41;
+            --secondary: #ff0080;
+            --accent: #00bfff;
+            --bg: #000;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg);
+            color: var(--primary);
+            font-family: 'Consolas', monospace;
+            height: 100vh;
+            overflow: hidden;
+            cursor: none;
+        }
+
+        canvas { position: fixed; top: 0; left: 0; z-index: 5; pointer-events: none; }
+
+        #cursor {
+            position: fixed; width: 14px; height: 14px;
+            background: #fff; border-radius: 50%;
+            z-index: 10000; pointer-events: none;
+            mix-blend-mode: difference;
+            box-shadow: 0 0 20px var(--primary);
+            transition: transform 0.05s ease-out;
+        }
+
+        .shake { animation: shake 0.1s infinite; }
+        @keyframes shake {
+            0% { transform: translate(1px, 1px); }
+            50% { transform: translate(-5px, -4px) rotate(1deg); }
+            100% { transform: translate(2px, -1px); }
+        }
+
+        /* PANTALLAS ESPECIALES */
+        #bsod {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #0000aa; color: #fff;
+            display: none; flex-direction: column; justify-content: center;
+            align-items: center; padding: 40px; z-index: 20000;
+            text-align: center;
+        }
+
+        #bomb-alert {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.95); color: white;
+            padding: 40px; border-radius: 10px; z-index: 18000;
+            display: none; flex-direction: column; align-items: center;
+            box-shadow: 0 0 150px red; border: 4px solid white;
+            animation: pulse 0.4s infinite;
+        }
+
+        @keyframes pulse { 0% { scale: 1; } 50% { scale: 1.05; } 100% { scale: 1; } }
+
+        #timer { font-size: 90px; font-weight: bold; font-family: sans-serif; }
+
+        /* INTERFAZ */
+        .panel {
+            position: fixed; background: rgba(0, 0, 0, 0.9);
+            border: 1px solid var(--primary); padding: 15px; z-index: 100;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+        }
+
+        .stats { top: 20px; left: 20px; width: 280px; }
+        .controls { bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; }
+
+        button {
+            background: transparent; border: 1px solid var(--primary);
+            color: var(--primary); padding: 12px; font-weight: bold;
+            cursor: none; transition: 0.2s; text-transform: uppercase;
+        }
+
+        button:hover { background: var(--primary); color: #000; box-shadow: 0 0 30px var(--primary); }
+        button.active { border-color: var(--secondary); color: var(--secondary); animation: blink 0.5s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        .stat-line { display: flex; justify-content: space-between; margin: 4px 0; font-size: 13px; }
+    </style>
+</head>
+<body id="main">
+
+    <div id="cursor"></div>
+    <canvas id="canvas"></canvas>
+
+    <!-- ALERTA BOMBA -->
+    <div id="bomb-alert">
+        <h1 style="letter-spacing: 5px;">CORE MELTDOWN</h1>
+        <p>¡ENFRÍA EL NÚCLEO HACIENDO CLICK!</p>
+        <div id="timer">5.00</div>
+        <p>REDUCE LA ENTROPÍA BAJO EL 40%</p>
+    </div>
+
+    <!-- PANTALLAZO AZUL -->
+    <div id="bsod">
+        <div style="font-size: 100px;">:(</div>
+        <br>
+        <h2>ERROR_FATAL: SYSTEM_DISINTEGRATED</h2>
+        <p>La cuarta pared ha sido destruida por el caos.</p>
+        <br>
+        <p>RESTABLECIENDO SEGMENTOS... <span id="percent">0</span>%</p>
+    </div>
+
+    <!-- UI STATS -->
+    <div class="panel stats">
+        <div style="color: var(--accent); font-weight: bold; margin-bottom: 10px;">OMEGA SYSTEM V5.0</div>
+        <div class="stat-line"><span>ENTROPÍA:</span> <span id="entropy" style="color:#fff">0%</span></div>
+        <div class="stat-line"><span>ESTADO:</span> <span id="status">ESTABLE</span></div>
+        <div class="stat-line"><span>VOZ:</span> <span style="color:var(--primary)">ONLINE</span></div>
+    </div>
+
+    <!-- CONTROLES -->
+    <div class="panel controls">
+        <button id="megaBtn" onclick="App.toggleMega()">MODO CAOS INFINITO</button>
+        <button onclick="App.hardReset()">REINICIO MANUAL</button>
+    </div>
+
+    <script>
+        // --- MOTOR DE VOZ ---
+        const Voice = {
+            say(t, p = 0.5, r = 0.8) {
+                const u = new SpeechSynthesisUtterance(t);
+                u.pitch = p; u.rate = r; u.lang = 'es-ES';
+                window.speechSynthesis.speak(u);
+            }
+        };
+
+        // --- MOTOR DE AUDIO ---
+        const Sound = {
+            ctx: null,
+            play(f) {
+                if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+                o.type = 'sawtooth'; o.frequency.setValueAtTime(f, this.ctx.currentTime);
+                o.frequency.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                g.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                o.connect(g); g.connect(this.ctx.destination);
+                o.start(); o.stop(this.ctx.currentTime + 0.2);
+            }
+        };
+
+        // --- PARTÍCULAS ---
+        class Bit {
+            constructor(x, y, color) {
+                this.x = x; this.y = y; this.color = color;
+                const a = Math.random() * 6.28; const v = Math.random() * 12 + 2;
+                this.vx = Math.cos(a)*v; this.vy = Math.sin(a)*v; this.alpha = 1;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.vy += 0.1; this.alpha -= 0.02; }
+            draw(ctx) { ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, 4, 4); }
+        }
+
+        // --- CORE APP ---
+        const App = {
+            ctx: document.getElementById('canvas').getContext('2d'),
+            bits: [], entropy: 0, isMega: false, isDead: false, bombActive: false, timeLeft: 5.0,
+
+            init() {
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                window.addEventListener('mousemove', e => {
+                    document.getElementById('cursor').style.left = e.clientX + 'px';
+                    document.getElementById('cursor').style.top = e.clientY + 'px';
+                });
+                window.addEventListener('mousedown', e => this.handleClick(e));
+                this.loop();
+            },
+
+            resize() { this.ctx.canvas.width = window.innerWidth; this.ctx.canvas.height = window.innerHeight; },
+
+            handleClick(e) {
+                if(this.isDead) return;
+                
+                if(this.bombActive) {
+                    this.entropy = Math.max(0, this.entropy - 6);
+                    Sound.play(400);
+                    if(this.entropy < 40) this.deactivateBomb();
+                } else {
+                    this.entropy = Math.min(100, this.entropy + 2);
+                    Sound.play(100 + this.entropy * 4);
+                }
+
+                for(let i=0; i<20; i++) this.bits.push(new Bit(e.clientX, e.clientY, this.entropy > 75 ? '#f00' : '#0f0'));
+                this.updateUI();
+                if(this.entropy >= 80 && !this.bombActive) this.activateBomb();
+            },
+
+            updateUI() {
+                document.getElementById('entropy').textContent = this.entropy.toFixed(0) + "%";
+                const s = document.getElementById('status');
+                if(this.entropy > 80) { s.textContent = "¡CRÍTICO!"; s.style.color = "red"; }
+                else if(this.entropy > 50) { s.textContent = "INESTABLE"; s.style.color = "orange"; }
+                else { s.textContent = "ESTABLE"; s.style.color = "var(--primary)"; }
+            },
+
+            activateBomb() {
+                this.bombActive = true; this.timeLeft = 5.0;
+                document.getElementById('bomb-alert').style.display = 'flex';
+                document.getElementById('main').classList.add('shake');
+                Voice.say("Bomba activada. Colapso inminente. Enfría el sistema ahora.", 0.4, 0.9);
+            },
+
+            deactivateBomb() {
+                this.bombActive = false;
+                document.getElementById('bomb-alert').style.display = 'none';
+                document.getElementById('main').classList.remove('shake');
+                Voice.say("Crisis evitada. Sistema en enfriamiento.");
+            },
+
+            triggerBoom() {
+                this.isDead = true; this.bombActive = false;
+                document.getElementById('bomb-alert').style.display = 'none';
+                document.getElementById('bsod').style.display = 'flex';
+                Voice.say("Explosión total. Realidad borrada.", 0.1, 0.5);
+                
+                let p = 0;
+                const inv = setInterval(() => {
+                    p += 5; document.getElementById('percent').textContent = p;
+                    if(p >= 100) { clearInterval(inv); this.hardReset(); }
+                }, 200);
+            },
+
+            toggleMega() {
+                this.isMega = !this.isMega;
+                const btn = document.getElementById('megaBtn');
+                btn.classList.toggle('active');
+                if(this.isMega) Voice.say("Protocolo de caos iniciado. No hay vuelta atrás.");
+            },
+
+            hardReset() {
+                this.entropy = 0; this.bits = []; this.isDead = false; this.bombActive = false;
+                document.getElementById('bsod').style.display = 'none';
+                document.getElementById('main').classList.remove('shake');
+                document.getElementById('megaBtn').classList.remove('active');
+                this.updateUI();
+                Voice.say("Sistema restaurado con éxito.");
+            },
+
+            loop() {
+                this.ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                this.ctx.fillRect(0,0,this.ctx.canvas.width, this.ctx.canvas.height);
+
+                if(this.isMega && !this.isDead && !this.bombActive) {
+                    this.entropy = Math.min(100, this.entropy + 0.4);
+                    this.updateUI();
+                    if(this.entropy >= 80) this.activateBomb();
+                }
+
+                if(this.bombActive) {
+                    this.timeLeft -= 0.016;
+                    document.getElementById('timer').textContent = Math.max(0, this.timeLeft).toFixed(2);
+                    if(this.timeLeft <= 0) this.triggerBoom();
+                }
+
+                this.bits.forEach((b, i) => {
+                    b.update(); b.draw(this.ctx);
+                    if(b.alpha <= 0) this.bits.splice(i, 1);
+                });
+                requestAnimationFrame(() => this.loop());
+            }
+        };
+
+        App.init();
+    </script>
+</body>
+</html>
